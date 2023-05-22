@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow import keras
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import r2_score, mean_absolute_error
+from sklearn.metrics import r2_score, mean_squared_error
 
 from adam_optimizer import AdamOptimizer
     
@@ -93,11 +93,12 @@ class LSTM:
         stock_data_np = stock_data.to_numpy()
         #normalize data
         self.scalar.fit(stock_data_np)
-        
         stock_data_np = self.scalar.transform(stock_data_np)
+
         # Get the training size
         train_size = int(len(stock_data_np) * split)
         test_size = len(stock_data_np) - train_size
+
         # Make the training size divisible by the batch_size
         ones1 = train_size % 10
         ones_diff1 = ones1 - (train_size % self.batch_size)
@@ -115,6 +116,7 @@ class LSTM:
         return train_data, test_data
 
     def clear_caches(self):
+        # Clear caches for next pass through
         self.lstm_cache.clear()
         self.output_cache.clear()
         self.activation_cache.clear()
@@ -141,6 +143,7 @@ class LSTM:
 
     def lstm_cell(self, batch_data, h_prev, c_prev):
         parameters = self.parameters
+
         concat_data = np.concatenate([batch_data, h_prev], axis=1)
         f_t = self.sigmoid(np.matmul(concat_data, parameters['f_weight']))
         i_t = self.sigmoid(np.matmul(concat_data, parameters['i_weight']))
@@ -149,6 +152,8 @@ class LSTM:
 
         cell_activation = np.multiply(f_t, c_prev) + np.multiply(i_t, g_t)
         activation = np.multiply(o_t, np.tanh(cell_activation))
+        
+        # Store lstm cell activations
         state = dict()
         state['f_activation'] = f_t
         state['i_activation'] = i_t
@@ -162,7 +167,7 @@ class LSTM:
         
         #get outputs
         output_matrix = np.matmul(activation_matrix, W_h)
-        #output_matrix = self.relu(output_matrix)
+        #output_matrix = self.sigmoid(output_matrix)
         
         return output_matrix
 
@@ -174,20 +179,24 @@ class LSTM:
 
         for batch_data in batches:
             state, activation, cell_activation = self.lstm_cell(batch_data, prev_activation, prev_cell_activation)
+
+            # Update caches
             self.lstm_cache.append(state)
             self.activation_cache.append(activation)
             self.cell_activation_cache.append(cell_activation)
 
+            # Set values for previous activations to current cell values
             prev_activation = activation
             prev_cell_activation = cell_activation
-            output = self.output_cell(activation)
 
+            # Get output
+            output = self.output_cell(activation)
             self.output_cache.append(output)
         return 0
 
     #backpropagation
     def backward_prop(self, batch_data):
-        #calculate output cell derivatives
+        # Stores derivatives of weights
         derivatives = dict()
         derivatives['do_weight'] = np.zeros(self.parameters['o_weight'].shape)
         derivatives['do_bias'] = np.zeros(self.parameters['o_bias'].shape)
@@ -229,20 +238,20 @@ class LSTM:
 
             # Forget Gate Weights and Biases Errors
             f_error = dc_error * prev_cell_activation * self.sigmoid_derivative(f_activation)
-            derivatives['df_weight'] += np.matmul(concat_matrix.T, f_error)
-            derivatives['df_bias'] += f_error
+            derivatives['df_weight'] += np.matmul(concat_matrix.T, f_error) / self.batch_size
+            derivatives['df_bias'] += f_error / self.batch_size
 
             # Input Gate Weights and Biases Errors
             i_error = dc_error * g_activation * self.sigmoid_derivative(i_activation)
-            derivatives['di_weight'] += np.matmul(concat_matrix.T, i_error)
-            derivatives['di_bias'] += i_error
+            derivatives['di_weight'] += np.matmul(concat_matrix.T, i_error) / self.batch_size
+            derivatives['di_bias'] += i_error / self.batch_size
             
             # Candidate Gate Weights and Biases Errors
             g_error = dc_error * i_activation * self.tanh_derivative(g_activation)
-            derivatives['dg_weight'] += np.matmul(concat_matrix.T, g_error)
-            derivatives['dg_bias'] += g_error
+            derivatives['dg_weight'] += np.matmul(concat_matrix.T, g_error) / self.batch_size
+            derivatives['dg_bias'] += g_error / self.batch_size
 
-            #embedding + hidden activation error
+            # Hidden activation error
             input_activation_error = np.matmul(f_error, self.parameters['f_weight'].T)
             input_activation_error += np.matmul(i_error, self.parameters['i_weight'].T)
             input_activation_error += np.matmul(o_error, self.parameters['o_weight'].T)
@@ -253,46 +262,31 @@ class LSTM:
             hidden_units = set_shape.shape[1]
             input_units = input_hidden_units - hidden_units
             
-            #prev activation error
+            # Prev activation error
             next_activation_error = input_activation_error[:,input_units:]
-        
-        for key in derivatives.keys():
-            derivatives[key] /= self.batch_size
 
+        #calculate output cell derivatives
         derivatives['dh_weight'] = self.calculate_output_derivatives(output_error_cache, self.activation_cache)
         
         return derivatives
     
     def train(self):
-        #to store the Loss, Perplexity and Accuracy for each batch
-        J = []
-        P = []
-        A = []
-        
+        # Create batches from training data
         batch_data = self.batchify_data(self.train_data, self.batch_size)
-        asdf = []
+
         for step in range(self.epochs):
             for batches in batch_data:                
-                #forward propagation
+                # Forward propagation
                 self.forward_prop([batches], self.batch_size)
 
-                perplexity, loss, accuracy = self.cal_loss_accuracy([batches])
-                J.append(perplexity)
-                P.append(loss)
-                A.append(accuracy)
-                
-                #backward propagation
+                # Backward propagation
                 derivatives = self.backward_prop(batches)
-                #update the parameters
+
+                # Update the parameters
                 self.parameters = self.adam_optimizer.update_parameters(self.parameters, derivatives)
+
                 self.clear_caches()
-                print("For Single Batch :")
-                print('Step       = {}'.format(step))
-                print('Loss       = {}'.format(round(loss,2)))
-                print('Perplexity = {}'.format(round(perplexity,2)))
-                print('Accuracy   = {}'.format(round(accuracy*100,2)))
-                print()
-        return J, P, A
+        return
     
     def calculate_output_error(self, batch_data):
         output_error_cache = []
@@ -305,7 +299,8 @@ class LSTM:
             pred = self.output_cache[i]
 
             output_error = pred - actual
-
+            #output_error = mean_squared_error(actual, pred)
+            #print(output_error)
             activation_error = np.matmul(output_error, hidden_weight.T)
 
             output_error_cache.append(output_error)
@@ -313,63 +308,32 @@ class LSTM:
 
         return output_error_cache, activation_error_cache
     
-    #calculate loss, perplexity and accuracy
-    def cal_loss_accuracy(self, batch_data):
-        loss = 0  #to sum loss for each time step
-        acc  = 0  #to sum acc for each time step 
-        prob = 1  #probability product of each time step predicted char
-        
-        #batch size
-        batch_size = batch_data[0].shape[0]
-        
-        #loop through each time step
-        for i in range(len(self.output_cache)):
-            #get true labels and predictions
-            labels = batch_data[i]
-            pred = self.output_cache[i]
-            
-            prob = np.multiply(prob,np.sum(np.multiply(labels,pred),axis=1).reshape(-1,1))
-            loss += np.sum((np.multiply(labels,np.log(pred)) + np.multiply(1-labels,np.log(1-pred))),axis=1).reshape(-1,1)
-            acc  += np.array(np.argmax(labels,1)==np.argmax(pred,1),dtype=np.float32).reshape(-1,1)
-        
-        #calculate perplexity loss and accuracy
-        perplexity = np.sum((1/prob)**(1/len(self.output_cache)))/batch_size
-        loss = np.sum(loss)*(-1/batch_size)
-        acc  = np.sum(acc)/(batch_size)
-        acc = acc/len(self.output_cache)
-        
-        return perplexity,loss,acc
-    
-    
-    #calculate output cell derivatives
     def calculate_output_derivatives(self, output_error_cache, activation_cache):
-        #to store the sum of derivatives from each time step
+        # To store the sum of derivatives from each time step
         dh_weight = np.zeros(self.parameters['h_weight'].shape)
                 
-        #loop through the time steps 
         for t in range(len(output_error_cache)):
-            #get output error
+            # Get output error
             output_error = output_error_cache[t]
             
-            #get input activation
+            # Get input activation
             activation = activation_cache[t]
             
-            #cal derivative and summing up!
+            # Calculate derivative
             dh_weight += np.matmul(activation.T, output_error) / self.batch_size
             
         return dh_weight
 
     def predict(self, batch_size):
-        predictions = []  # Store the predicted values
-        
+        predictions = []    # Stores the predicted values
+
         prev_activation = np.zeros((batch_size, self.hidden_size))  # Initialize previous activation
         prev_cell_activation = np.zeros((batch_size, self.hidden_size))  # Initialize previous cell activation
-        # Get last batch of train data to start prediction from
         
-        #batch_data = self.batchify_data(self.train_data)[1]
+        # Prime LSTM model for predictions
         data = self.train_data[:]
         batch_data = self.batchify_data(data, batch_size)
-        # Prime LSTM model for predictions
+        
         self.forward_prop(batch_data, batch_size)
         prev_activation = self.activation_cache[-1]
         #print(type(prev_activation))
@@ -378,25 +342,26 @@ class LSTM:
         batch_data = self.output_cache[-1]
 
         # Predict each batch
-        for _ in range(len(self.test_data)):
+        for i in range(len(self.test_data)):
             state, activation, cell_activation = self.lstm_cell(batch_data, prev_activation, prev_cell_activation)
             prev_activation = activation
             prev_cell_activation = cell_activation
             
             # Output cell
-            
-            
             prediction = self.output_cell(activation)
             predictions.append(prediction)
+
+
             batch_data = prediction
 
-        # Concatenate and reshape the predictions
         
-        predictions = np.concatenate(predictions)
+        #print(predictions)
         #predictions = self.scalar.fit_transform(predictions)
         #normalized_pred = self.scalar.inverse_transform(predictions)
+        predictions = np.asarray(predictions)
+        predictions = predictions[:, 0, :]
 
-        return predictions[0], #normalized_pred
+        return predictions, #normalized_pred
 
     def calculate_direction_accuracy(self, predictions, window_size):
         correct_predictions = 0
@@ -425,9 +390,8 @@ class LSTM:
 
     def visualize_results(self, predictions):
         #actual = self.scalar.inverse_transform(self.test_data)
-        print(predictions)
-
-        df = pd.DataFrame(predictions, columns =['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume'])
+        predictions[0]
+        df = pd.DataFrame(predictions[0], columns =['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume'])
         plt.figure(figsize=(15, 8))
         plt.title('Stock Prices Predictions')
         plt.plot(df['Close'])
@@ -445,6 +409,7 @@ class LSTM:
         '''
         return 0
     
+    # Change to MSE
     def evaluate(self, predictions):
         y_true = self.scalar.inverse_transform(self.test_data)[:, 3]
         mae = mean_absolute_error(predictions, y_true)
@@ -468,7 +433,7 @@ class LSTM:
 
 def main():
     adam_optimizer = AdamOptimizer({
-        'learning_rate':    0.001, 
+        'learning_rate':    0.05, 
         'beta1':            0.90, 
         'beta2':            0.999, 
         'epsilon':          1e-8
@@ -483,12 +448,12 @@ def main():
 
     lstm = LSTM({
         'input_size':       6, 
-        'hidden_size':      150, 
+        'hidden_size':      64, 
         'batch_size':       10, 
-        'epochs':           20
+        'epochs':           100
     }, adam_optimizer, data)
     lstm.train()
-    predictions = lstm.predict(1)
+    predictions = lstm.predict(10)
     #print(normalized_predictions[:100])
     #print(lstm.calculate_direction_accuracy(predictions, 10))
     #r2, mae = lstm.evaluate(normalized_predictions[:, 3])
