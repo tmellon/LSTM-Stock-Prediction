@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow import keras
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 
 from adam_optimizer import AdamOptimizer
     
@@ -452,6 +452,7 @@ def main():
         'batch_size':       10, 
         'epochs':           100
     }, adam_optimizer, data)
+    
     lstm.train()
     predictions = lstm.predict(10)
     #print(normalized_predictions[:100])
