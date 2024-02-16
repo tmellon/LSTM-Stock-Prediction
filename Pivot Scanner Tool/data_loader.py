@@ -14,7 +14,7 @@ class DataLoader:
     
     def download(self, ticker, start_date, end_date, interval):
         df = yf.download(ticker, interval=interval, start=start_date, end=end_date)
-        filename = './Pivot Scanner Tool/Market Data/' + ticker + '_' + 'start_date' + '_' + end_date + '_' + interval + '.csv'
+        filename = './Pivot Scanner Tool/Market Data/' + ticker + '_' + start_date + '_' + end_date + '_' + interval + '.csv'
         df.to_csv(filename)
 
 def main():

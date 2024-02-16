@@ -2,6 +2,7 @@ import math
 import numpy as np
 import pandas as pd
 from datetime import datetime
+from price_density import mean_price_density, price_density
 
 class PivotScanner:
     def __init__(self, data):
@@ -220,13 +221,21 @@ class PivotScanner:
         return 1
     
 def main():
-    data = pd.read_csv('./Pivot Scanner Tool/Market Data/EURUSD=X_start_date_2024-02-05_5m.csv')
-    print(data.iloc[0].values, data.iloc[1].values)
+    data = pd.read_csv('./Pivot Scanner Tool/Market Data/EURUSD=X_2023-12-11_2024-02-08_5m.csv')
+    #print(data.iloc[0].values, data.iloc[1].values)
     pv = PivotScanner(data)
     #pv.initialize(depth=4, maxHours=72, minPivots=3, dev_threshold=0.5)
-    pv.initialize(depth=10, maxHours=58, minPivots=9, dev_threshold=0.23888)
+    pv.initialize(dev_threshold=0.05, depth=2, maxHours=8, minPivots=15)
     volatile = pv.find_noise()
-    print(volatile)
+    print('Number Periods Selected =', len(volatile))
+    print('Resulting PD =', price_density(volatile))
+    average_p = 0
+    for period in volatile:
+        average_p += len(period)
+    average_p = int(average_p / len(volatile)) 
+    print(average_p)
+    print('Mean PD =', mean_price_density(data, average_p))
+    #print(volatile)
     #print(volatile[0])
     #print(volatile[0][0])
     #print(len(volatile))
